@@ -6,11 +6,11 @@ require('dotenv').config();
 async function main() {
   // Configuración de conexión (tomada de tu src/config/database.js)
   const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || "localhost",
-    user: process.env.DB_USER || "wilmer",
-    password: process.env.DB_PASSWORD || "123456",
-    database: process.env.DB_NAME || "db_crayons",
-    port: process.env.DB_PORT || 3306
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT
   });
 
   try {

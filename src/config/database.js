@@ -2,13 +2,13 @@
 const mysql = require("mysql2");
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "wilmer",
-  password: process.env.DB_PASSWORD || "123456",
-  database: process.env.DB_NAME || "db_crayons",
-  port: process.env.DB_PORT || 3306,
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
   waitForConnections: true,
-  connectionLimit: 50, // Optimizado para producción (hasta 50 conexiones simultáneas)
+  connectionLimit: 50,
   queueLimit: 0,
   timezone: "-05:00",
 });

@@ -39,10 +39,7 @@ app.locals.pool = pool;
 app.use(cors({
   origin: (origin, callback) => {
     const allowedOrigins = [
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'http://localhost:3000',
-      'https://micole-p6jy.vercel.app'
+      'https://front-crayons-bbh4.vercel.app'
     ];
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
