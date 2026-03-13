@@ -14,7 +14,7 @@ exports.extraerConN8N = async (req, res) => {
             contentType: req.file.mimetype,
         });
 
-        const response = await axios.post('http://localhost:5678/webhook-test/upload-pdf', formData, {
+        const response = await axios.post('https://n8n-production-1089.up.railway.app/webhook/upload-pdf', formData, {
             headers: { ...formData.getHeaders() }
         });
 

@@ -8,9 +8,10 @@ const AuditService = require("../services/AuditService");
 
 // Registro de usuario
 const register = async (req, res) => {
-  const connection = await pool.getConnection();
+  let connection;
 
   try {
+    connection = await pool.getConnection();
     await connection.beginTransaction();
 
     const {
@@ -107,8 +108,9 @@ const register = async (req, res) => {
 
 // Login
 const login = async (req, res) => {
-  const connection = await pool.getConnection();
+  let connection;
   try {
+    connection = await pool.getConnection();
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -201,7 +203,7 @@ const login = async (req, res) => {
     console.error(error);
     res.status(500).json({ message: "Error en el servidor" });
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 };
 
@@ -209,8 +211,9 @@ const refreshToken = async (req, res) => {
   const token = req.cookies.refreshToken;
   if (!token) return res.status(401).json({ message: "No refresh token provided" });
 
-  const connection = await pool.getConnection();
+  let connection;
   try {
+    connection = await pool.getConnection();
     const crypto = require('crypto');
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -264,13 +267,14 @@ const refreshToken = async (req, res) => {
     console.error("Error en refresh token:", error);
     res.status(500).json({ message: "Internal server error" });
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 };
 
 const changePassword = async (req, res) => {
-  const connection = await pool.getConnection();
+  let connection;
   try {
+    connection = await pool.getConnection();
     const { username, email, password, newPassword, repeatPassword } = req.body;
 
     if (!username || !email || !password || !newPassword || !repeatPassword) {
@@ -305,7 +309,7 @@ const changePassword = async (req, res) => {
     console.error("Error al cambiar la contraseña:", error);
     return res.status(500).json({ message: "Error en el servidor" });
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 };
 
@@ -313,13 +317,14 @@ const logout = async (req, res) => {
   try {
     const token = req.cookies.refreshToken;
     if (token) {
-      const connection = await pool.getConnection();
+      let connection;
       try {
+        connection = await pool.getConnection();
         const crypto = require('crypto');
         const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
         await connection.query("UPDATE refresh_tokens SET revocado = 1 WHERE token_hash = ?", [tokenHash]);
       } finally {
-        connection.release();
+        if (connection) connection.release();
       }
     }
 

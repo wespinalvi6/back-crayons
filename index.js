@@ -35,21 +35,32 @@ const logger = require("./src/config/logger");
 const app = express();
 app.locals.pool = pool;
 
+// Confiar en el proxy (necesario para Railway/Vercel)
+app.set('trust proxy', 1);
+
 // Middleware
+const allowedOrigins = [
+  'https://front-crayons-bbh4.vercel.app',
+  'https://front-crayons-bbh4.vercel.app/'
+];
+
 app.use(cors({
   origin: (origin, callback) => {
-    const allowedOrigins = [
-      'https://front-crayons-bbh4.vercel.app'
-    ];
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Permitir peticiones sin origin (como apps móviles o curl)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin) || allowedOrigins.includes(origin + '/')) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      logger.warn(`Origin no permitido por CORS: ${origin}`);
+      // No lanzar error, simplemente no permitir
+      callback(null, false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Access-Token', 'Cache-Control', 'Pragma']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Access-Token', 'Cache-Control', 'Pragma'],
+  optionsSuccessStatus: 200 // Para compatibilidad con navegadores antiguos
 }));
 
 app.use(cookieParser());
