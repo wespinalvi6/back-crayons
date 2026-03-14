@@ -40,8 +40,8 @@ app.set('trust proxy', 1);
 
 // Middleware
 const allowedOrigins = [
-  'https://api.colegiocrayons.com',
-  'https://api.colegiocrayons.com/'
+  'https://colegiocrayons.com',
+  'https://colegiocrayons.com/'
 ];
 
 app.use(cors({
