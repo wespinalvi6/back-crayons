@@ -40,8 +40,8 @@ app.set('trust proxy', 1);
 
 // Middleware
 const allowedOrigins = [
-  'https://front-crayons-bbh4.vercel.app',
-  'https://front-crayons-bbh4.vercel.app/'
+  'https://api.colegiocrayons.com',
+  'https://api.colegiocrayons.com/'
 ];
 
 app.use(cors({

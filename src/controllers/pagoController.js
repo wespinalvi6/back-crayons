@@ -58,7 +58,7 @@ const generarPagoCuota = async (req, res) => {
     const descripcion = `${item.tipo} ${item.numero_cuota > 0 ? item.numero_cuota : ''} - ${decryptedNombres} ${decryptedApPaterno}`;
 
     // Obtener la URL base y asegurar que no tenga slash final para construir rutas limpias
-    let DOMAIN = process.env.DOMAIN || 'https://nodejsback-production.up.railway.app';
+    let DOMAIN = process.env.DOMAIN || 'https://api.colegiocrayons.com';
     if (DOMAIN.endsWith('/')) {
       DOMAIN = DOMAIN.slice(0, -1);
     }
