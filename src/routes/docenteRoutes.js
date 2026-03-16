@@ -84,4 +84,7 @@ router.get("/listar-asistencias", verifyToken, DocenteController.listarAsistenci
 // Ruta para obtener asignaciones con alumnos para asistencia
 router.get("/mis-asignaciones-alumnos/:anio", verifyToken, DocenteController.getCursosYAlumnosAsignados);
 
+// Ruta para activar/desactivar acceso del docente
+router.patch("/toggle-estado/:id_docente", verifyToken, DocenteController.toggleEstadoDocente);
+
 module.exports = router;

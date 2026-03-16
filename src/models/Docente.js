@@ -94,9 +94,12 @@ class DocenteModel {
         d.fecha_ingreso,
         asig.id AS asignacion_id,
         c.nombre AS curso,
-        g.nombre AS grado
+        g.nombre AS grado,
+        u.activo,
+        pa.activo AS periodo_activo
       FROM docentes d
       JOIN personas p ON d.id_persona = p.id
+      JOIN users u ON u.id_persona = p.id
       JOIN asignaciones asig ON asig.id_docente = d.id
       JOIN cursos c ON asig.id_curso = c.id
       JOIN grados g ON asig.id_grado = g.id

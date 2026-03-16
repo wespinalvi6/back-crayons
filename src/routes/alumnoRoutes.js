@@ -23,5 +23,6 @@ router.get("/mis-datos", verifyToken, isAlumno, obtenerMisDatos);
 // Rutas para directores (requieren autenticación y rol de director)
 router.get("/estudiante/:id", verifyToken, isDirector, obtenerDatosEstudiante);
 router.put("/estudiante/:id", verifyToken, isDirector, editarDatosEstudiante);
+router.patch("/toggle-estado/:id", verifyToken, isDirector, require("../controllers/alumnoController").toggleEstadoAlumno);
 
 module.exports = router;

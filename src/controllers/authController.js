@@ -120,28 +120,34 @@ const login = async (req, res) => {
     }
 
     const user = await User.findByUsername(username, connection);
-    if (!user || (user.hasOwnProperty('activo') && user.activo === 0)) {
+
+    // Función de error genérico para evitar enumeración de usuarios
+    const handleLoginFailure = async (reason, userId = null) => {
       await AuditService.log({
+        userId,
         action: 'LOGIN_FAILURE',
-        details: { username, reason: !user ? 'User not found' : 'User inactive' },
+        details: { username, reason },
         ipAddress: req.ip
       });
-      return res
-        .status(user && user.activo === 0 ? 403 : 400)
-        .json({ message: user && user.activo === 0 ? "Su cuenta ha sido desactivada." : "Usuario o contraseña incorrectos" });
+      return res.status(401).json({ message: "Usuario o contraseña incorrectos" });
+    };
+
+    // 1. Verificar existencia del usuario
+    if (!user) {
+      return await handleLoginFailure('User not found');
     }
 
+    // 2. Verificar contraseña
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      await AuditService.log({
-        userId: user.id,
-        action: 'LOGIN_FAILURE',
-        details: { username, reason: 'Incorrect password' },
-        ipAddress: req.ip
-      });
-      return res
-        .status(400)
-        .json({ message: "Usuario o contraseña incorrectos" });
+      return await handleLoginFailure('Incorrect password', user.id);
+    }
+
+    // 3. Verificar si el usuario está activo (SOLO después de validar la contraseña)
+    // Opcional: Podrías usar el mismo mensaje genérico para que un atacante no sepa 
+    // si la contraseña fue correcta en una cuenta desactivada.
+    if (user.hasOwnProperty('activo') && user.activo === 0) {
+      return await handleLoginFailure('User inactive', user.id);
     }
 
     const accessTokenSecret = process.env.JWT_SECRET;

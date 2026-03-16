@@ -83,7 +83,8 @@ class CuotasModel {
   static async buscarPorDniYAnio(dni, anio) {
     const dniHash = blindIndex(dni);
     const query = `
-        SELECT c.*, p.nombres, p.apellido_paterno, p.apellido_materno, g.nombre as grado, p.dni
+        SELECT c.*, p.nombres, p.apellido_paterno, p.apellido_materno, g.nombre as grado, p.dni,
+               pa.activo as periodo_activo, m.estado as matricula_estado
         FROM cuotas c
         JOIN matriculas m ON c.id_matricula = m.id
         JOIN alumnos a ON m.id_alumno = a.id

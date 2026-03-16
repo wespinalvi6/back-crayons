@@ -83,8 +83,35 @@ class CuotasController {
     try {
       const { id_cuota, monto_pagado, metodo_pago, numero_recibo, observaciones } = req.body;
 
-      if (!id_cuota) {
-        return res.status(400).json({ status: false, message: 'El ID de la cuota es obligatorio' });
+      // 1. Verificar existencia de la cuota y estados
+      const [cuotaRows] = await pool.pool.query(`
+        SELECT c.*, pa.activo as periodo_activo, m.estado as matricula_estado
+        FROM cuotas c
+        JOIN matriculas m ON c.id_matricula = m.id
+        JOIN periodos_academicos pa ON m.id_periodo = pa.id
+        WHERE c.id = ?
+      `, [id_cuota]);
+
+      if (cuotaRows.length === 0) {
+        return res.status(404).json({ status: false, message: 'No se encontró la cuota' });
+      }
+
+      const info = cuotaRows[0];
+
+      // Validar si el periodo está activo
+      if (!info.periodo_activo) {
+        return res.status(400).json({
+          status: false,
+          message: 'No se pueden registrar pagos en un periodo académico inactivo.'
+        });
+      }
+
+      // Validar si el alumno está retirado
+      if (info.matricula_estado === 'Retirado') {
+        return res.status(400).json({
+          status: false,
+          message: 'No se pueden registrar pagos para un estudiante con estado Retirado.'
+        });
       }
 
       const actualizado = await Cuota.registrarPago(

@@ -29,6 +29,7 @@ const listarAlumnosConApoderados = async (req, res) => {
       `
       SELECT
         e.id AS alumno_id, p.dni AS alumno_dni, p.nombres AS alumno_nombre, p.apellido_paterno AS alumno_apellido_paterno, p.apellido_materno AS alumno_apellido_materno, p.fecha_nacimiento,
+        e.estado, u.activo, pa3.activo AS periodo_activo,
         pax.dni AS apoderado_dni, pax.nombres AS apoderado_nombre, pax.apellido_paterno AS apoderado_apellido_paterno, pax.apellido_materno AS apoderado_apellido_materno, pax.telefono,
         ea.parentesco, g.nombre AS grado_nombre, m.fecha_matricula
       FROM (
@@ -37,6 +38,7 @@ const listarAlumnosConApoderados = async (req, res) => {
       ) AS filtered
       JOIN alumnos e ON e.id = filtered.id
       JOIN personas p ON e.id_persona = p.id
+      JOIN users u ON u.id_persona = p.id
       LEFT JOIN alumno_apoderado ea ON ea.id_alumno = e.id
       LEFT JOIN apoderados ap ON ap.id = ea.id_apoderado
       LEFT JOIN personas pax ON pax.id = ap.id_persona
@@ -60,6 +62,9 @@ const listarAlumnosConApoderados = async (req, res) => {
           fecha_nacimiento: row.fecha_nacimiento,
           grado: row.grado_nombre,
           fecha_matricula: row.fecha_matricula,
+          estado: row.estado,
+          activo: row.activo,
+          periodo_activo: row.periodo_activo,
           apoderados: []
         });
       }
@@ -284,4 +289,50 @@ const listarAlumnosPaginado = async (req, res) => {
   }
 };
 
-module.exports = { listarAlumnosConApoderados, verMiAsistencia, verMisFaltas, obtenerMisDatos, obtenerDatosEstudiante, editarDatosEstudiante, listarAlumnosPaginado };
+const toggleEstadoAlumno = async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const { id } = req.params;
+    const { estado, activo } = req.body; // e.g., { estado: 'Retirado', activo: 0 }
+
+    const alumno = await AlumnoModel.buscarPorId(connection, id);
+    if (!alumno) return res.status(404).json({ success: false, message: "Alumno no encontrado." });
+
+    await connection.beginTransaction();
+
+    // Actualizar estado del alumno
+    await connection.query(
+      "UPDATE alumnos SET estado = ? WHERE id = ?",
+      [estado, id]
+    );
+
+    // Actualizar activo del usuario
+    await connection.query(
+      "UPDATE users SET activo = ? WHERE id_persona = ?",
+      [activo, alumno.id_persona]
+    );
+
+    await connection.commit();
+
+    res.status(200).json({
+      success: true,
+      message: `Alumno ${estado === 'Retirado' ? 'retirado' : 'activado'} correctamente.`
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    connection.release();
+  }
+};
+
+module.exports = {
+  listarAlumnosConApoderados,
+  verMiAsistencia,
+  verMisFaltas,
+  obtenerMisDatos,
+  obtenerDatosEstudiante,
+  editarDatosEstudiante,
+  listarAlumnosPaginado,
+  toggleEstadoAlumno
+};

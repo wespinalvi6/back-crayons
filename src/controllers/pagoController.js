@@ -25,11 +25,13 @@ const generarPagoCuota = async (req, res) => {
     // Para simplificar, primero buscamos la cuota y verificamos el alumno
     const [rows] = await connection.query(`
       SELECT c.*, CAST(c.monto AS DECIMAL(10,2)) as monto_decimal,
-             a.id as id_alumno, p.id as id_persona, p.nombres, p.apellido_paterno, p.apellido_materno, p.dni, p.email
+             a.id as id_alumno, p.id as id_persona, p.nombres, p.apellido_paterno, p.apellido_materno, p.dni, p.email,
+             pa.activo as periodo_activo, m.estado as matricula_estado
       FROM cuotas c
       JOIN matriculas m ON c.id_matricula = m.id
       JOIN alumnos a ON m.id_alumno = a.id
       JOIN personas p ON a.id_persona = p.id
+      JOIN periodos_academicos pa ON m.id_periodo = pa.id
       WHERE c.id = ?
     `, [id_cuota]);
 
@@ -38,6 +40,22 @@ const generarPagoCuota = async (req, res) => {
     }
 
     const item = rows[0];
+
+    // Validar si el periodo está activo
+    if (!item.periodo_activo) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se pueden realizar pagos en un periodo académico inactivo.'
+      });
+    }
+
+    // Validar si el alumno está retirado
+    if (item.matricula_estado === 'Retirado') {
+      return res.status(400).json({
+        success: false,
+        message: 'No se pueden realizar pagos para un estudiante con estado Retirado.'
+      });
+    }
     const decryptedDni = decrypt(item.dni);
     const decryptedNombres = decrypt(item.nombres);
     const decryptedApPaterno = decrypt(item.apellido_paterno);
@@ -205,13 +223,38 @@ const registrarPagoPresencial = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Faltan campos obligatorios (id_cuota, monto_pagado)' });
     }
 
-    // 1. Verificar existencia de la cuota
-    const [cuotaRows] = await pool.pool.query("SELECT * FROM cuotas WHERE id = ?", [id_cuota]);
+    // 1. Verificar existencia de la cuota y estados
+    const [cuotaRows] = await pool.pool.query(`
+      SELECT c.*, pa.activo as periodo_activo, m.estado as matricula_estado
+      FROM cuotas c
+      JOIN matriculas m ON c.id_matricula = m.id
+      JOIN periodos_academicos pa ON m.id_periodo = pa.id
+      WHERE c.id = ?
+    `, [id_cuota]);
+
     if (cuotaRows.length === 0) {
       return res.status(404).json({ success: false, message: 'Cuota no encontrada' });
     }
 
-    if (cuotaRows[0].estado === 'Pagada') {
+    const info = cuotaRows[0];
+
+    // Validar si el periodo está activo
+    if (!info.periodo_activo) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se pueden registrar pagos en un periodo académico inactivo.'
+      });
+    }
+
+    // Validar si el alumno está retirado
+    if (info.matricula_estado === 'Retirado') {
+      return res.status(400).json({
+        success: false,
+        message: 'No se pueden registrar pagos para un estudiante con estado Retirado.'
+      });
+    }
+
+    if (info.estado === 'Pagada') {
       return res.status(400).json({ success: false, message: 'Esta cuota ya figura como pagada' });
     }
 

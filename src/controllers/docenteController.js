@@ -304,6 +304,8 @@ const docenteController = {
               dni: decrypt(row.dni),
               nombre_completo: row.nombre_completo,
               fecha_registro: row.fecha_ingreso,
+              activo: row.activo,
+              periodo_activo: row.periodo_activo,
               cursos: [],
             };
           }
@@ -781,6 +783,38 @@ const docenteController = {
 
     } catch (error) {
       res.status(500).json({ success: false, message: "Error interno del servidor.", error: error.message });
+    } finally {
+      connection.release();
+    }
+  },
+
+  async toggleEstadoDocente(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const { id_docente } = req.params;
+      const { activo } = req.body; // Nuevo estado deseado (0 o 1)
+
+      // Obtener el id_persona asociado al docente
+      const [rows] = await connection.query(
+        "SELECT id_persona FROM docentes WHERE id = ?",
+        [id_docente]
+      );
+
+      if (rows.length === 0) {
+        return res.status(404).json({ success: false, message: "Docente no encontrado." });
+      }
+
+      const id_persona = rows[0].id_persona;
+
+      // Actualizar el estado en la tabla users
+      await connection.query(
+        "UPDATE users SET activo = ? WHERE id_persona = ?",
+        [activo, id_persona]
+      );
+
+      res.json({ success: true, message: `Acceso del docente ${activo === 1 ? 'activado' : 'desactivado'} con éxito.` });
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Error al cambiar estado del docente.", error: error.message });
     } finally {
       connection.release();
     }
