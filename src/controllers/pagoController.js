@@ -183,9 +183,6 @@ const webhookMercadoPago = async (req, res) => {
 
       const { status, status_detail, external_reference, transaction_amount, payment_method_id } = payment;
 
-      console.log(`Estado del pago ${paymentId}: ${status} (${status_detail})`);
-      console.log(`Referencia externa (ID Cuota): ${external_reference}`);
-
       if (status === 'approved') {
         const idCuota = external_reference;
 
@@ -193,19 +190,13 @@ const webhookMercadoPago = async (req, res) => {
         const esYape = (payment_method_id === 'yape' || (payment_method_id === 'account_money' && payment.payment_type_id === 'account_money'));
         const metodoFinal = esYape ? 'Yape' : 'Tarjeta';
 
-        console.log(`Registrando pago aprobado para cuota ${idCuota} vía ${metodoFinal}`);
-
-        // Generar URL del comprobante de Mercado Pago
-        const receiptUrl = `https://www.mercadopago.com.pe/tools/receipt-view/${paymentId}`;
-
         // Actualizar base de datos
         const pagado = await Cuota.registrarPago(
           idCuota,
           transaction_amount,
           metodoFinal,
           String(paymentId),
-          `Pago online MercadoPago (${status_detail})`,
-          receiptUrl
+          `Pago online MercadoPago (${status_detail})`
         );
 
         if (pagado) {
@@ -337,16 +328,7 @@ const generarConstanciaPago = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No se puede generar comprobante de una cuota pendiente.' });
     }
 
-    // Si tiene un comprobante externo (ej. Mercado Pago), informamos al frontend
-    if (info.comprobante_url) {
-      return res.json({
-        success: true,
-        external: true,
-        url: info.comprobante_url
-      });
-    }
-
-    // Crear el documento PDF (Para pagos presenciales)
+    // Crear el documento PDF
     const doc = new PDFDocument({ margin: 50 });
 
     // Configurar cabeceras de respuesta
