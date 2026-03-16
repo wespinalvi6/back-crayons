@@ -62,7 +62,7 @@ class CuotasModel {
   }
 
   // Actualizar estado de una cuota (pago realizado)
-  static async registrarPago(idCuota, montoPagado, metodoPago, numeroRecibo, observaciones) {
+  static async registrarPago(idCuota, montoPagado, metodoPago, numeroRecibo, observaciones, comprobanteUrl = null) {
     const query = `
       UPDATE cuotas 
       SET 
@@ -72,10 +72,11 @@ class CuotasModel {
         metodo_pago = ?,
         numero_recibo = ?,
         observaciones = ?,
+        comprobante_url = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
-    const [result] = await db.pool.query(query, [montoPagado, metodoPago, numeroRecibo, observaciones, idCuota]);
+    const [result] = await db.pool.query(query, [montoPagado, metodoPago, numeroRecibo, observaciones, comprobanteUrl, idCuota]);
     return result.affectedRows > 0;
   }
 
