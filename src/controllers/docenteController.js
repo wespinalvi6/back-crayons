@@ -390,8 +390,8 @@ const docenteController = {
         infoDocentes.addRow({
           anio: anio, id: docente.id, nombre: docente.nombre,
           apellido_paterno: docente.apellido_paterno, apellido_materno: docente.apellido_materno,
-          dni: decrypt(docente.dni), fecha_nacimiento: new Date(docente.fecha_nacimiento).toLocaleDateString(),
-          email: docente.email, fecha_registro: new Date(docente.fecha_ingreso).toLocaleDateString(),
+          dni: decrypt(docente.dni), fecha_nacimiento: new Date(docente.fecha_nacimiento).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }),
+          email: docente.email, fecha_registro: new Date(docente.fecha_ingreso).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }),
           cursos: docente.cursos || 'Sin cursos asignados'
         });
       });
@@ -607,7 +607,8 @@ const docenteController = {
       if (!rowsAsig || rowsAsig.length === 0) return res.status(403).json({ success: false, message: "Sin asignación." });
 
       const [asistencia] = await connection.query(
-        `SELECT ast.*, p.dni, p.nombres as nombre, p.apellido_paterno as ap_p, p.apellido_materno as ap_m
+        `SELECT ast.*, p.dni, p.nombres as nombre, p.apellido_paterno as ap_p, p.apellido_materno as ap_m,
+                TIME_FORMAT(ast.created_at, '%h:%i %p') as hora_formateada
          FROM asistencia ast 
          JOIN alumnos al ON ast.id_alumno = al.id 
          JOIN personas p ON al.id_persona = p.id
@@ -633,7 +634,7 @@ const docenteController = {
         ap_p: a.ap_p,
         ap_m: a.ap_m,
         estado: a.asistio ? 'Presente' : 'Ausente',
-        hora: a.created_at ? new Date(a.created_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--',
+        hora: a.hora_formateada ? a.hora_formateada.toLowerCase() : '--:--',
         observacion: a.observacion || ''
       }));
 
@@ -660,7 +661,8 @@ const docenteController = {
       if (!rowsAsig || rowsAsig.length === 0) return res.status(403).json({ success: false, message: "Sin asignación." });
 
       const [asistenciaRows] = await connection.query(
-        `SELECT ast.*, p.dni, p.nombres as nombre, p.apellido_paterno as ap_p, p.apellido_materno as ap_m
+        `SELECT ast.*, p.dni, p.nombres as nombre, p.apellido_paterno as ap_p, p.apellido_materno as ap_m,
+                TIME_FORMAT(ast.created_at, '%h:%i %p') as hora_formateada
          FROM asistencia ast 
          JOIN alumnos al ON ast.id_alumno = al.id 
          JOIN personas p ON al.id_persona = p.id
@@ -672,7 +674,7 @@ const docenteController = {
         ...a,
         dni: decrypt(a.dni),
         estado: a.asistio ? 'Presente' : 'Ausente',
-        hora_llegada: a.created_at ? new Date(a.created_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: true }) : '--:--',
+        hora_llegada: a.hora_formateada ? a.hora_formateada.toLowerCase() : '--:--',
         observaciones: a.observacion
       }));
       return res.status(200).json({ success: true, data: asistencias });

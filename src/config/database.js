@@ -13,6 +13,11 @@ const pool = mysql.createPool({
   timezone: "-05:00",
 });
 
+// Forzar zona horaria de Perú en cada conexión para evitar desfases con el servidor (ej. Railway UTC)
+pool.on('connection', (connection) => {
+  connection.query("SET time_zone = '-05:00'");
+});
+
 const promisePool = pool.promise();
 
 async function withTransaction(callback) {
