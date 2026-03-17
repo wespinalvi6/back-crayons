@@ -160,7 +160,7 @@ const login = async (req, res) => {
       const resetToken = jwt.sign(
         { id: user.id, id_persona: user.id_persona, username: user.username, id_rol: user.id_rol, change_password_required: true },
         accessTokenSecret,
-        { expiresIn: "15m" }
+        { expiresIn: "50m" }
       );
       return res.status(403).json({
         message: "Debe cambiar su contraseña antes de continuar",
