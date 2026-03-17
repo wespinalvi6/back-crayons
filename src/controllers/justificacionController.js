@@ -36,7 +36,8 @@ const subirArchivo = async (file) => {
 const crearJustificacion = async (req, res) => {
   let connection;
   try {
-    const { titulo, descripcion, tipo, fecha_inicio, fecha_fin, id_asistencia } = req.body;
+    const { titulo, descripcion, tipo, id_asistencia } = req.body;
+    let { fecha_inicio, fecha_fin } = req.body;
     const id_persona = req.user.id_persona;
 
     if (!req.file) {
@@ -61,8 +62,6 @@ const crearJustificacion = async (req, res) => {
 
     const { id_matricula, id_alumno } = matriculaRow[0];
     let id_docente = null;
-    let fecha_inicio_real = fecha_inicio;
-    let fecha_fin_real = fecha_fin;
 
     // 2. Si se proporciona una asistencia específica, obtener el docente y la fecha
     if (id_asistencia) {
@@ -90,10 +89,22 @@ const crearJustificacion = async (req, res) => {
 
       if (asistenciaRow && asistenciaRow.length > 0) {
         id_docente = asistenciaRow[0].id_docente;
-        // Si no mandó fecha, usar la de la asistencia
-        if (!fecha_inicio_real) fecha_inicio_real = asistenciaRow[0].fecha;
-        if (!fecha_fin_real) fecha_fin_real = asistenciaRow[0].fecha;
+        // Forzar fechas de la asistencia
+        fecha_inicio = asistenciaRow[0].fecha;
+        fecha_fin = asistenciaRow[0].fecha;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'La falta seleccionada no es válida o no le pertenece.'
+        });
       }
+    }
+
+    if (!fecha_inicio || !fecha_fin) {
+      return res.status(400).json({
+        success: false,
+        message: 'Debe especificar el rango de fechas o seleccionar una falta registrada.'
+      });
     }
 
     const { url, public_id } = await subirArchivo(req.file);
@@ -117,8 +128,8 @@ const crearJustificacion = async (req, res) => {
       titulo,
       descripcion: descripcion || '',
       tipo: tipoFinal,
-      fecha_inicio: fecha_inicio_real,
-      fecha_fin: fecha_fin_real,
+      fecha_inicio: fecha_inicio,
+      fecha_fin: fecha_fin,
       url_documento: url,
       cloudinary_public_id: public_id
     };
@@ -130,11 +141,13 @@ const crearJustificacion = async (req, res) => {
       message: 'Justificación enviada correctamente. El docente la revisará pronto.',
       data: {
         id: justificacionId,
-        estado: 'Pendiente'
+        estado: 'Pendiente',
+        fecha: fecha_inicio
       }
     });
 
   } catch (error) {
+    console.error('Error al crear justificación:', error);
     res.status(500).json({
       success: false,
       message: 'Error al procesar la justificación',
@@ -196,7 +209,7 @@ const obtenerJustificacionesDocente = async (req, res) => {
   try {
     const id_persona = req.user.id_persona;
     const page = parseInt(req.query.page) || 1;
-    const limit = 5;
+    const limit = 50; // Aumentar límite para vista de docentes
     const offset = (page - 1) * limit;
 
     connection = await pool.getConnection();
@@ -217,19 +230,28 @@ const obtenerJustificacionesDocente = async (req, res) => {
     const { anio, mes, dia, estado } = req.query;
 
     let estadoFinal = estado;
+    let filtrarPorFecha = true;
+
     if (!estado && req.path.includes('/historial')) {
-      estadoFinal = null; // Si entra por la ruta historial, por defecto muestra todo
+      estadoFinal = null;
     } else if (!estado) {
-      estadoFinal = 'Pendiente'; // Si no dice nada, por defecto muestra Pendiente
+      estadoFinal = 'Pendiente';
+      // Para pendientes, si no se especifica fecha, mostrar todas
+      if (!anio && !mes && !dia) filtrarPorFecha = false;
     } else if (estado === 'todas' || estado === 'todos') {
-      estadoFinal = null; // Muestra todas (aprobadas, rechazadas, pendientes)
+      estadoFinal = null;
     }
 
     const { rows, total } = await Justificacion.obtenerPorDocentePaginado(
       id_docente,
       limit,
       offset,
-      { anio, mes, dia, estado: estadoFinal }
+      {
+        anio: filtrarPorFecha ? anio : null,
+        mes: filtrarPorFecha ? mes : null,
+        dia: filtrarPorFecha ? dia : null,
+        estado: estadoFinal
+      }
     );
 
     // Descifrar nombres del alumno
@@ -239,28 +261,20 @@ const obtenerJustificacionesDocente = async (req, res) => {
       alumno_nombres: undefined, alumno_ap_p: undefined, alumno_ap_m: undefined
     }));
 
-    // Agrupar por fecha de inicio
-    const agrupadoPorFecha = decryptedRows.reduce((acc, current) => {
-      const fechaKey = new Date(current.fecha_inicio).toISOString().split('T')[0];
-      if (!acc[fechaKey]) {
-        acc[fechaKey] = {
-          fecha: fechaKey,
-          solicitudes: []
-        };
-      }
-      acc[fechaKey].solicitudes.push(current);
-      return acc;
-    }, {});
+    // Agrupar por fecha o estado según sea el caso
+    // Si buscamos pendientes globales, agrupamos por "Pendientes"
+    const dataResponse = decryptedRows;
 
     res.json({
       success: true,
-      data: Object.values(agrupadoPorFecha),
+      data: dataResponse,
       page,
       total,
       totalPages: Math.ceil(total / limit)
     });
 
   } catch (error) {
+    console.error('Error al obtener justificaciones docente:', error);
     res.status(500).json({
       success: false,
       message: 'Error al obtener las justificaciones',
