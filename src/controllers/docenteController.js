@@ -668,7 +668,20 @@ const docenteController = {
                  WHERE ah.id_alumno = ast.id_alumno 
                    AND ah.fecha = ast.fecha 
                    AND ah.id_asistencia = ast.id 
-                 LIMIT 1) as obs_detallada
+                 LIMIT 1) as obs_detallada,
+                (SELECT CAST(CONCAT('[', GROUP_CONCAT(
+                          JSON_OBJECT(
+                            'estado', ah.estado, 
+                            'observacion', ah.observacion, 
+                            'hora_inicio', TIME_FORMAT(h.hora_inicio, '%H:%i'), 
+                            'hora_fin', TIME_FORMAT(h.hora_fin, '%H:%i')
+                          )
+                        ), ']') AS JSON)
+                 FROM asistencia_horario ah 
+                 JOIN horarios h ON ah.id_horario = h.id
+                 WHERE ah.id_alumno = ast.id_alumno 
+                   AND ah.fecha = ast.fecha 
+                   AND h.id_asignacion = ast.id_asignacion) as detalles
          FROM asistencia ast 
          JOIN alumnos al ON ast.id_alumno = al.id 
          JOIN personas p ON al.id_persona = p.id
@@ -681,7 +694,8 @@ const docenteController = {
         dni: decrypt(a.dni),
         estado: a.asistio ? 'Presente' : 'Ausente',
         hora_llegada: a.hora_formateada ? a.hora_formateada.toLowerCase() : '--:--',
-        observaciones: a.obs_detallada || a.observacion
+        observaciones: a.obs_detallada || a.observacion,
+        detalles_bloque: typeof a.detalles === 'string' ? JSON.parse(a.detalles) : (a.detalles || [])
       }));
       return res.status(200).json({ success: true, data: asistencias });
     } catch (error) {
