@@ -178,9 +178,7 @@ Si hay datos vacíos o no hay registros, indícaselo al usuario de manera amable
 
         // ─── PASO 3: Respuesta final ──────────────────────────────────────────────
         return res.status(200).json({
-            sql: aiJson.sql,
-            respuesta: finalAnswer,
-            datos: dbResult
+            respuesta: finalAnswer
         });
 
     } catch (error) {
