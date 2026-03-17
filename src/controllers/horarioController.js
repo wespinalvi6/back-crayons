@@ -865,7 +865,7 @@ const horarioController = {
            ON DUPLICATE KEY UPDATE
              asistio = VALUES(asistio),
              observacion = VALUES(observacion)`,
-          [row.id_alumno, horario.id_asignacion, fechaFinal, asistioDiario, observacion || "Generado desde asistencia por bloques"]
+          [row.id_alumno, horario.id_asignacion, fechaFinal, asistioDiario, asistencia.find(a => a.id_alumno == row.id_alumno)?.observacion || null]
         );
       }
 
@@ -1307,7 +1307,7 @@ const horarioController = {
           horario.id_asignacion,
           fechaFinal,
           asistioDiario,
-          "Generado desde asistencia por horario",
+          observacion || null,
         ]
       );
 

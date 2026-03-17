@@ -662,7 +662,13 @@ const docenteController = {
 
       const [asistenciaRows] = await connection.query(
         `SELECT ast.*, p.dni, p.nombres as nombre, p.apellido_paterno as ap_p, p.apellido_materno as ap_m,
-                TIME_FORMAT(ast.created_at, '%h:%i %p') as hora_formateada
+                TIME_FORMAT(ast.created_at, '%h:%i %p') as hora_formateada,
+                (SELECT GROUP_CONCAT(ah.observacion SEPARATOR ' | ') 
+                 FROM asistencia_horario ah 
+                 WHERE ah.id_alumno = ast.id_alumno 
+                   AND ah.fecha = ast.fecha 
+                   AND ah.id_asistencia = ast.id 
+                 LIMIT 1) as obs_detallada
          FROM asistencia ast 
          JOIN alumnos al ON ast.id_alumno = al.id 
          JOIN personas p ON al.id_persona = p.id
@@ -675,7 +681,7 @@ const docenteController = {
         dni: decrypt(a.dni),
         estado: a.asistio ? 'Presente' : 'Ausente',
         hora_llegada: a.hora_formateada ? a.hora_formateada.toLowerCase() : '--:--',
-        observaciones: a.observacion
+        observaciones: a.obs_detallada || a.observacion
       }));
       return res.status(200).json({ success: true, data: asistencias });
     } catch (error) {
