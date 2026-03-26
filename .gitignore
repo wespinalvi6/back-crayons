@@ -1,2 +1,6 @@
 node_modules/
 .env
+firebase-service-account.json
+scripts/setup_admin.js
+checklist-produccion.html
+logs/combined.log

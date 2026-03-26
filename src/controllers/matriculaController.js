@@ -51,19 +51,14 @@ class MatriculaController {
           estudiante.tipo_ingreso
         );
 
-        // Crear usuario para el alumno
-        const username = `${estudiante.dni}`;
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(estudiante.dni, salt);
+        // NO se crea usuario para el alumno.
+        // Los usuarios se crean para los PADRES en la función procesarApoderado.
 
-        try {
-          await User.crear(connection, { id_persona: alumnoPersonaId, email: estudiante.email || `${estudiante.dni}@colegio.edu.pe`, password: hashedPassword, username, id_rol: 3 });
-        } catch (error) { if (error.code !== 'ER_DUP_ENTRY') throw error; }
-
-        // 2. Procesar Apoderados (Padre y Madre)
+        // 2. Procesar Apoderados (Padre y Madre) y crear sus usuarios
+        const usuariosCreados = [];
         const procesarApoderado = async (datos, relacion) => {
           if (!datos || !datos.dni) return;
-          // Intentamos crear, si existe devuelve el ID
+          // Crear persona del apoderado (si ya existe, devuelve el ID)
           const personaId = await Persona.crear(
             connection,
             datos.dni,
@@ -77,6 +72,25 @@ class MatriculaController {
           );
           const apoderadoId = await Apoderado.crear(connection, personaId, datos.ocupacion || null);
           await AlumnoApoderado.crear(connection, alumnoId, apoderadoId, relacion);
+
+          // Crear usuario para el apoderado con id_rol=3
+          const usernameApoderado = datos.dni;
+          const saltApoderado = await bcrypt.genSalt(10);
+          const hashedPasswordApoderado = await bcrypt.hash(datos.dni, saltApoderado);
+          try {
+            await User.crear(connection, {
+              id_persona: personaId,
+              email: `${datos.dni}@colegio.edu.pe`,
+              password: hashedPasswordApoderado,
+              username: usernameApoderado,
+              id_rol: 3
+            });
+            usuariosCreados.push({ relacion, username: usernameApoderado, password: datos.dni });
+          } catch (error) {
+            if (error.code !== 'ER_DUP_ENTRY') throw error;
+            // Si ya existe el usuario, solo lo registramos como ya existente
+            usuariosCreados.push({ relacion, username: usernameApoderado, password: datos.dni, ya_existia: true });
+          }
         };
 
         if (padre) await procesarApoderado(padre, 'Padre');
@@ -153,7 +167,7 @@ class MatriculaController {
           }
         }
 
-        return { alumno_id: alumnoId, matricula_id: matriculaId, username, password: estudiante.dni };
+        return { alumno_id: alumnoId, matricula_id: matriculaId, usuarios_padres: usuariosCreados };
       });
 
       return res.status(201).json({ status: true, message: "Matrícula registrada correctamente.", data: resultado });

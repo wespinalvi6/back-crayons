@@ -1,12 +1,12 @@
 const cloudinary = require('cloudinary').v2;
 const Justificacion = require('../models/Justificacion');
-const pool = require('../config/database');
+const { pool } = require('../config/database');
 const { decrypt } = require('../utils/cryptoUtils');
 
 cloudinary.config({
-  cloud_name: 'dszdc6rh8',
-  api_key: '919272483314272',
-  api_secret: 's4hxHUmwJSfav_PB0TnHjZoHIVc'
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
 // Subir PDF a Cloudinary
@@ -41,26 +41,92 @@ const crearJustificacion = async (req, res) => {
     const id_persona = req.user.id_persona;
 
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Debe subir un comprobante (PDF)' });
+      return res.status(400).json({ success: false, message: 'Debe subir un comprobante (PDF o Imagen)' });
+    }
+
+    // Vuln #11: Validación estricta de Magic Numbers para el contenido del archivo subido
+    const magic = req.file.buffer.toString('hex', 0, 4);
+    const allowedMagics = [
+      '25504446', // PDF
+      'ffd8ffe0', 'ffd8ffe1', 'ffd8ffee', 'ffd8ffdb', 'ffd8ffe2', // JPEG
+      '89504e47'  // PNG
+    ];
+    if (!allowedMagics.includes(magic)) {
+      return res.status(400).json({ success: false, message: 'El archivo subido no es un PDF o una imagen válidos.' });
     }
 
     connection = await pool.getConnection();
 
-    // 1. Obtener datos del alumno y su matrícula activa
-    const [matriculaRow] = await connection.query(
-      `SELECT m.id as id_matricula, a.id as id_alumno 
-       FROM alumnos a 
-       JOIN matriculas m ON a.id = m.id_alumno 
-       WHERE a.id_persona = ? 
-       ORDER BY m.created_at DESC LIMIT 1`,
-      [id_persona]
-    );
+    // 1. Obtener datos del alumno y su matrícula activa (Soportar tanto alumnos como padres)
+    let id_alumno, id_matricula;
 
-    if (!matriculaRow || matriculaRow.length === 0) {
-      return res.status(404).json({ success: false, message: 'No se encontró matrícula activa para este alumno' });
+    if (id_asistencia) {
+      // Si tenemos la asistencia, sabemos exactamente quién es el alumno
+      const [rows] = await connection.query(
+        `SELECT ast.id_alumno, m.id as id_matricula 
+         FROM asistencia ast
+         JOIN matriculas m ON ast.id_alumno = m.id_alumno
+         WHERE ast.id = ? 
+         ORDER BY m.created_at DESC LIMIT 1`,
+        [id_asistencia]
+      );
+      if (rows.length > 0) {
+        id_alumno = rows[0].id_alumno;
+        id_matricula = rows[0].id_matricula;
+
+        // VERIFICAR ACCESO: El usuario debe ser el propio alumno o uno de sus apoderados
+        const [acceso] = await connection.query(
+          `SELECT 1 FROM alumnos a WHERE a.id = ? AND a.id_persona = ?
+           UNION
+           SELECT 1 
+           FROM apoderados ap
+           JOIN alumno_apoderado aa ON ap.id = aa.id_apoderado
+           WHERE aa.id_alumno = ? AND ap.id_persona = ?`,
+          [id_alumno, id_persona, id_alumno, id_persona]
+        );
+
+        if (acceso.length === 0) {
+          return res.status(403).json({ success: false, message: 'No tiene permiso para justificar esta falta.' });
+        }
+      }
     }
 
-    const { id_matricula, id_alumno } = matriculaRow[0];
+    // Si aún no tenemos los IDs (vía asistencia o si falló la búsqueda por asistencia), buscar por id_persona del usuario
+    if (!id_alumno) {
+      const [matriculaRow] = await connection.query(
+        `SELECT m.id as id_matricula, a.id as id_alumno 
+         FROM alumnos a 
+         JOIN matriculas m ON a.id = m.id_alumno 
+         WHERE a.id_persona = ? 
+         ORDER BY m.created_at DESC LIMIT 1`,
+        [id_persona]
+      );
+
+      if (matriculaRow && matriculaRow.length > 0) {
+        id_alumno = matriculaRow[0].id_alumno;
+        id_matricula = matriculaRow[0].id_matricula;
+      } else {
+        // Intentar como apoderado
+        const [apoderadoRow] = await connection.query(
+          `SELECT m.id as id_matricula, a.id as id_alumno 
+           FROM apoderados ap
+           JOIN alumno_apoderado aa ON ap.id = aa.id_apoderado
+           JOIN alumnos a ON aa.id_alumno = a.id
+           JOIN matriculas m ON a.id = m.id_alumno
+           WHERE ap.id_persona = ? 
+           ORDER BY m.created_at DESC LIMIT 1`,
+          [id_persona]
+        );
+        if (apoderadoRow && apoderadoRow.length > 0) {
+          id_alumno = apoderadoRow[0].id_alumno;
+          id_matricula = apoderadoRow[0].id_matricula;
+        }
+      }
+    }
+
+    if (!id_alumno) {
+      return res.status(404).json({ success: false, message: 'No se encontró matrícula activa o alumno asociado.' });
+    }
     let id_docente = null;
 
     // 2. Si se proporciona una asistencia específica, obtener el docente y la fecha
@@ -381,6 +447,12 @@ const actualizarEstadoJustificacion = async (req, res) => {
         message: 'Justificación no encontrada'
       });
     }
+
+    // Notificar al alumno/padre en segundo plano
+    const { notifyJustificationUpdate } = require('../utils/notificationHelper');
+    notifyJustificationUpdate(pool, id, estadoFinal, comentario_revision).catch(err => {
+      console.error('Error enviando notificación de justificación:', err);
+    });
 
     res.json({
       success: true,

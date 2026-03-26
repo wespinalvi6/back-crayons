@@ -5,6 +5,18 @@ const pool = require("../config/database");
 const { decrypt, blindIndex } = require("../utils/cryptoUtils");
 const AuditService = require("../services/AuditService");
 
+// Helper para sanitizar strings
+const sanitizeString = (str) => {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[<>\"'%;()&+\-\*\/\\]/g, '').trim();
+};
+
+// Helper para validar que el parámetro sea un número entero positivo
+const validatePositiveInt = (val) => {
+  const num = parseInt(val);
+  return !isNaN(num) && num > 0 ? num : null;
+};
+
 const listarAlumnosConApoderados = async (req, res) => {
   try {
     const anio = req.params.anio;
@@ -30,7 +42,7 @@ const listarAlumnosConApoderados = async (req, res) => {
       SELECT
         e.id AS alumno_id, p.dni AS alumno_dni, p.nombres AS alumno_nombre, p.apellido_paterno AS alumno_apellido_paterno, p.apellido_materno AS alumno_apellido_materno, p.fecha_nacimiento,
         e.estado, u.activo, pa3.activo AS periodo_activo,
-        pax.dni AS apoderado_dni, pax.nombres AS apoderado_nombre, pax.apellido_paterno AS apoderado_apellido_paterno, pax.apellido_materno AS apoderado_apellido_materno, pax.telefono,
+        pax.dni AS apoderado_dni, pax.nombres AS apoderado_nombre, pax.apellido_paterno AS apoderado_apellido_paterno, pax.apellido_materno AS apoderado_apellido_materno, pax.telefono AS apoderado_telefono,
         ea.parentesco, g.nombre AS grado_nombre, m.fecha_matricula
       FROM (
         SELECT a2.id FROM alumnos a2 JOIN matriculas m2 ON m2.id_alumno = a2.id JOIN periodos_academicos pa2 ON m2.id_periodo = pa2.id
@@ -38,7 +50,7 @@ const listarAlumnosConApoderados = async (req, res) => {
       ) AS filtered
       JOIN alumnos e ON e.id = filtered.id
       JOIN personas p ON e.id_persona = p.id
-      JOIN users u ON u.id_persona = p.id
+      LEFT JOIN users u ON u.id_persona = p.id AND u.id_rol = 3
       LEFT JOIN alumno_apoderado ea ON ea.id_alumno = e.id
       LEFT JOIN apoderados ap ON ap.id = ea.id_apoderado
       LEFT JOIN personas pax ON pax.id = ap.id_persona
@@ -75,7 +87,7 @@ const listarAlumnosConApoderados = async (req, res) => {
           nombre: decrypt(row.apoderado_nombre),
           apellido_paterno: decrypt(row.apoderado_apellido_paterno),
           apellido_materno: decrypt(row.apoderado_apellido_materno),
-          telefono: decrypt(row.telefono),
+          telefono: row.apoderado_telefono ? decrypt(row.apoderado_telefono) : null,
           parentesco: row.parentesco
         });
       }
@@ -110,9 +122,13 @@ const verMiAsistencia = async (req, res) => {
       LEFT JOIN docentes d ON asig.id_docente = d.id
       LEFT JOIN personas pd ON d.id_persona = pd.id
       LEFT JOIN grados g ON m.id_grado = g.id
-      WHERE a.id_persona = ?
+      WHERE (a.id_persona = ? OR EXISTS (
+        SELECT 1 FROM alumno_apoderado aa
+        JOIN apoderados ap ON aa.id_apoderado = ap.id
+        WHERE aa.id_alumno = a.id AND ap.id_persona = ?
+      ))
     `;
-    const params = [id_persona];
+    const params = [id_persona, id_persona];
     if (anio) { query += " AND YEAR(ast.fecha) = ?"; params.push(anio); }
     if (mes) { query += " AND MONTH(ast.fecha) = ?"; params.push(mes); }
     if (dia) { query += " AND DAY(ast.fecha) = ?"; params.push(dia); }
@@ -144,9 +160,13 @@ const verMisFaltas = async (req, res) => {
       JOIN alumnos a ON m.id_alumno = a.id
       JOIN asignaciones asig ON ast.id_asignacion = asig.id
       JOIN cursos c ON asig.id_curso = c.id
-      WHERE a.id_persona = ? AND ast.estado = 'Ausente'
+      WHERE (a.id_persona = ? OR EXISTS (
+        SELECT 1 FROM alumno_apoderado aa
+        JOIN apoderados ap ON aa.id_apoderado = ap.id
+        WHERE aa.id_alumno = a.id AND ap.id_persona = ?
+      )) AND ast.estado = 'Ausente'
       ORDER BY ast.fecha DESC
-    `, [id_persona]);
+    `, [id_persona, id_persona]);
     return res.status(200).json({ success: true, total: rows.length, data: rows });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -244,7 +264,6 @@ const listarAlumnosPaginado = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
-    const search = req.query.search || '';
 
     let mainQuery = `
       SELECT e.id as id_alumno, p.dni, p.nombres, p.apellido_paterno, p.apellido_materno, e.codigo_alumno, g.nombre as grado
@@ -256,13 +275,22 @@ const listarAlumnosPaginado = async (req, res) => {
       WHERE pa.activo = 1
     `;
     let queryParams = [];
+    const search = req.query.search ? sanitizeString(req.query.search) : null;
+
     if (search) {
-      if (search.match(/^\d{8}$/)) {
+      // Validar que el search sea DNI (8 dígitos) o código de alumno (alphanumeric)
+      if (/^\d{8}$/.test(search)) {
         mainQuery += " AND p.dni_hash = ?";
         queryParams.push(blindIndex(search));
-      } else {
+      } else if (/^[a-zA-Z0-9\-_]{3,50}$/.test(search)) {
+        // Solo permitir código de alumno con caracteres válidos
         mainQuery += " AND e.codigo_alumno LIKE ?";
         queryParams.push(`%${search}%`);
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Parámetro de búsqueda inválido'
+        });
       }
     }
 
@@ -306,17 +334,34 @@ const toggleEstadoAlumno = async (req, res) => {
       [estado, id]
     );
 
-    // Actualizar activo del usuario
+    // Actualizar activo del usuario del alumno (si tiene uno directamente en users)
     await connection.query(
-      "UPDATE users SET activo = ? WHERE id_persona = ?",
+      "UPDATE users SET activo = ? WHERE id_persona = ? AND id_rol = 3",
       [activo, alumno.id_persona]
     );
 
+    // Desactivar/reactivar usuarios de los padres/apoderados vinculados
+    const [apoderados] = await connection.query(
+      `SELECT ap.id_persona
+       FROM alumno_apoderado aa
+       JOIN apoderados ap ON ap.id = aa.id_apoderado
+       WHERE aa.id_alumno = ?`,
+      [id]
+    );
+
+    for (const apoderado of apoderados) {
+      await connection.query(
+        "UPDATE users SET activo = ? WHERE id_persona = ? AND id_rol = 3",
+        [activo, apoderado.id_persona]
+      );
+    }
+
     await connection.commit();
 
+    const accionTexto = activo === 0 ? 'dado de baja' : 'habilitado';
     res.status(200).json({
       success: true,
-      message: `Alumno ${estado === 'Retirado' ? 'retirado' : 'activado'} correctamente.`
+      message: `Alumno ${accionTexto} correctamente.`
     });
   } catch (error) {
     if (connection) await connection.rollback();

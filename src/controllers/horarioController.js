@@ -2,6 +2,7 @@ const { pool } = require("../config/database");
 const ExcelJS = require("exceljs");
 const PDFDocument = require("pdfkit");
 const { decrypt } = require("../utils/cryptoUtils");
+const { notifyAbsenceToParents } = require("../utils/notificationHelper");
 
 const DIA_TO_JS = {
   Lunes: 1,
@@ -189,7 +190,7 @@ const horarioController = {
   async obtenerReporteHorarios(req, res) {
     const connection = await pool.getConnection();
     try {
-      const { id_periodo, id_docente, id_grado, id_curso } = req.query;
+      const { id_periodo, id_docente, id_grado, id_curso, id_seccion } = req.query;
 
       const where = ["h.activo = 1"];
       const params = [];
@@ -209,6 +210,10 @@ const horarioController = {
       if (id_curso) {
         where.push("a.id_curso = ?");
         params.push(id_curso);
+      }
+      if (id_seccion) {
+        where.push("a.id_seccion = ?");
+        params.push(id_seccion);
       }
 
       const [rows] = await connection.query(
@@ -680,6 +685,7 @@ const horarioController = {
            AND m.id_periodo = ?
            AND (? IS NULL OR m.id_seccion = ?)
            AND m.estado IN ('Activa', 'Pendiente')
+           AND a.estado != 'Retirado'
          ORDER BY p.apellido_paterno, p.apellido_materno, p.nombres`,
         [idHorario, fechaFinal, horario.id_grado, horario.id_periodo, horario.id_seccion, horario.id_seccion]
       );
@@ -755,9 +761,14 @@ const horarioController = {
             a.id_docente,
             a.id_grado,
             a.id_seccion,
-            a.id_periodo
+            a.id_periodo,
+            c.nombre AS nombre_curso,
+            CONCAT(p.nombres, ' ', p.apellido_paterno) AS nombre_docente
          FROM horarios h
          JOIN asignaciones a ON a.id = h.id_asignacion
+         JOIN cursos c ON c.id = a.id_curso
+         JOIN docentes d ON d.id = a.id_docente
+         JOIN personas p ON p.id = d.id_persona
          WHERE h.id = ? AND h.activo = 1`,
         [id_horario]
       );
@@ -883,6 +894,17 @@ const horarioController = {
       );
 
       await connection.commit();
+
+      // Enviar notificaciones de falta (Ausente) en segundo plano
+      asistencia.filter(a => a.estado === 'Ausente').forEach(item => {
+        notifyAbsenceToParents(
+          pool,
+          item.id_alumno,
+          horario.nombre_curso,
+          fechaFinal,
+          horario.nombre_docente
+        ).catch(e => console.error('Error notifying from masiva:', e.message));
+      });
 
       return res.status(201).json({
         success: true,
@@ -1351,6 +1373,149 @@ const horarioController = {
         message: "Error al registrar asistencia por horario.",
         error: error.message,
       });
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Horario visual semanal del docente (L-V, todas las horas)
+  async obtenerMiHorarioSemanal(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const docenteId = await getDocenteIdFromUser(connection, req);
+      if (!docenteId) {
+        return res.status(403).json({ success: false, message: "Docente no encontrado para el usuario autenticado." });
+      }
+
+      // Obtener el periodo activo
+      const [periodoRows] = await connection.query(
+        "SELECT id, anio FROM periodos_academicos WHERE activo = 1 ORDER BY id DESC LIMIT 1"
+      );
+      if (!periodoRows.length) {
+        return res.status(400).json({ success: false, message: "No se encontró periodo activo." });
+      }
+      const periodoId = periodoRows[0].id;
+
+      const [rows] = await connection.query(
+        `SELECT
+            h.id AS id_horario,
+            h.dia_semana,
+            h.hora_inicio,
+            h.hora_fin,
+            h.aula,
+            a.id AS id_asignacion,
+            c.nombre AS curso,
+            g.nombre AS grado,
+            COALESCE(s.nombre, '') AS seccion
+         FROM horarios h
+         JOIN asignaciones a ON a.id = h.id_asignacion
+         JOIN cursos c ON c.id = a.id_curso
+         JOIN grados g ON g.id = a.id_grado
+         LEFT JOIN secciones s ON s.id = a.id_seccion
+         WHERE h.activo = 1
+           AND a.id_docente = ?
+           AND a.id_periodo = ?
+         ORDER BY FIELD(h.dia_semana, 'Lunes','Martes','Miercoles','Jueves','Viernes','Sabado','Domingo'), h.hora_inicio`,
+        [docenteId, periodoId]
+      );
+
+      return res.status(200).json({
+        success: true,
+        total: rows.length,
+        data: rows,
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, message: "Error al obtener horario semanal.", error: error.message });
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Horario visual semanal del alumno (para la app móvil — rol padre)
+  async obtenerHorarioAlumno(req, res) {
+    const connection = await pool.getConnection();
+    try {
+      const id_persona = req.user.id_persona;
+
+      // Buscar el alumno vinculado (padre puede tener un alumno)
+      // Primero buscamos si es padre (id_persona de un apoderado)
+      const [apoderadoRows] = await connection.query(
+        `SELECT ap.id FROM apoderados ap WHERE ap.id_persona = ?`,
+        [id_persona]
+      );
+
+      let alumnoId = null;
+
+      if (apoderadoRows.length > 0) {
+        // Es padre, buscar el alumno vinculado
+        const [alumnoApRows] = await connection.query(
+          `SELECT id_alumno FROM alumno_apoderado WHERE id_apoderado = ? LIMIT 1`,
+          [apoderadoRows[0].id]
+        );
+        if (alumnoApRows.length > 0) alumnoId = alumnoApRows[0].id_alumno;
+      } else {
+        // Podría ser el propio alumno
+        const [alumnoRows] = await connection.query(
+          `SELECT id FROM alumnos WHERE id_persona = ? LIMIT 1`,
+          [id_persona]
+        );
+        if (alumnoRows.length > 0) alumnoId = alumnoRows[0].id;
+      }
+
+      if (!alumnoId) {
+        return res.status(404).json({ success: false, message: "Alumno no encontrado para este usuario." });
+      }
+
+      // Buscar la matrícula activa del alumno
+      const [matriculaRows] = await connection.query(
+        `SELECT m.id, m.id_grado, m.id_periodo
+         FROM matriculas m
+         JOIN periodos_academicos pa ON m.id_periodo = pa.id
+         WHERE m.id_alumno = ? AND pa.activo = 1
+         ORDER BY m.id DESC LIMIT 1`,
+        [alumnoId]
+      );
+
+      if (!matriculaRows.length) {
+        return res.status(404).json({ success: false, message: "No se encontró matrícula activa para el alumno." });
+      }
+
+      const { id_grado, id_periodo } = matriculaRows[0];
+
+      const [rows] = await connection.query(
+        `SELECT
+            h.id AS id_horario,
+            h.dia_semana,
+            h.hora_inicio,
+            h.hora_fin,
+            h.aula,
+            a.id AS id_asignacion,
+            c.nombre AS curso,
+            g.nombre AS grado,
+            COALESCE(s.nombre, '') AS seccion,
+            d.id AS id_docente,
+            CONCAT(p.nombres, ' ', p.apellido_paterno, ' ', p.apellido_materno) AS docente
+         FROM horarios h
+         JOIN asignaciones a ON a.id = h.id_asignacion
+         JOIN cursos c ON c.id = a.id_curso
+         JOIN grados g ON g.id = a.id_grado
+         LEFT JOIN secciones s ON s.id = a.id_seccion
+         LEFT JOIN docentes d ON d.id = a.id_docente
+         LEFT JOIN personas p ON p.id = d.id_persona
+         WHERE h.activo = 1
+           AND a.id_grado = ?
+           AND a.id_periodo = ?
+         ORDER BY FIELD(h.dia_semana, 'Lunes','Martes','Miercoles','Jueves','Viernes','Sabado','Domingo'), h.hora_inicio`,
+        [id_grado, id_periodo]
+      );
+
+      return res.status(200).json({
+        success: true,
+        total: rows.length,
+        data: rows,
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, message: "Error al obtener horario del alumno.", error: error.message });
     } finally {
       connection.release();
     }

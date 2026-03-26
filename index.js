@@ -38,31 +38,41 @@ app.locals.pool = pool;
 // Confiar en el proxy (necesario para Railway/Vercel)
 app.set('trust proxy', 1);
 
-// Middleware
-const allowedOrigins = [
-  'https://colegiocrayons.com',
-  'https://colegiocrayons.com/',
-  'http://localhost:5173/',
-  'http://localhost:5173'
-];
+// Validar variables de entorno críticas al inicio
+const requiredEnvVars = ['JWT_SECRET', 'ENCRYPTION_KEY'];
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+if (missingEnvVars.length > 0) {
+  logger.error(`FATAL: Variables de entorno faltantes: ${missingEnvVars.join(', ')}`);
+  process.exit(1);
+}
+
+// Middleware CORS - Solo orígenes explícitamente permitidos
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? [
+    'https://colegiocrayons.com',
+    'https://www.colegiocrayons.com'
+  ]
+  : [
+    'https://colegiocrayons.com',
+    'https://www.colegiocrayons.com',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Permitir peticiones sin origin (como apps móviles o curl)
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin) || allowedOrigins.includes(origin + '/')) {
+    // Vuln #12: CORS Estricto - Solo permitir orígenes explícitos
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
       callback(null, true);
     } else {
-      logger.warn(`Origin no permitido por CORS: ${origin}`);
-      // No lanzar error, simplemente no permitir
-      callback(null, false);
+      logger.warn(`Origin bloqueado por CORS: ${origin}`);
+      callback(new Error('No autorizado por CORS'), false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Access-Token', 'Cache-Control', 'Pragma'],
-  optionsSuccessStatus: 200 // Para compatibilidad con navegadores antiguos
+  optionsSuccessStatus: 200
 }));
 
 app.use(cookieParser());
@@ -73,17 +83,28 @@ app.use(helmet());
 // Compresión de respuestas HTTP (GZIP) optimiza el peso de los JSON
 app.use(compression());
 
-// Rate Limiting General
+// Rate Limiting Específico para Autenticación (Vuln #10)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50, // 5 intentos permitidos por cada ventana de 15 minutos
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Demasiados intentos de inicio de sesión, intente más tarde." }
+});
+app.use("/api/auth/login", authLimiter);
+
+// Rate Limiting General - Reducido de 1000 a 100 requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000, // Increased max for development/general use
+  max: 200, // 100 requests por 15 minutos
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Demasiadas peticiones, intente más tarde." }
 });
 app.use("/api/", limiter);
 
-app.use(express.json({ limit: '10mb' }));
+// Limitar tamaño de JSON body (reducido de 10MB a 2MB)
+app.use(express.json({ limit: '2mb' }));
 
 // Rutas
 app.use("/api/auth", authRoutes);

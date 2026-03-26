@@ -439,6 +439,7 @@ const docenteController = {
            JOIN grados g ON g.id = m.id_grado
            JOIN periodos_academicos pa ON m.id_periodo = pa.id
            WHERE pa.anio = ? AND g.id = ?
+             AND a.estado != 'Retirado'
            ORDER BY p.apellido_paterno, p.apellido_materno, p.nombres`,
           [anio, grado.id_grado]
         );
@@ -669,19 +670,19 @@ const docenteController = {
                    AND ah.fecha = ast.fecha 
                    AND ah.id_asistencia = ast.id 
                  LIMIT 1) as obs_detallada,
-                (SELECT CAST(CONCAT('[', GROUP_CONCAT(
+                (SELECT JSON_ARRAYAGG(
                           JSON_OBJECT(
                             'estado', ah.estado, 
                             'observacion', ah.observacion, 
                             'hora_inicio', TIME_FORMAT(h.hora_inicio, '%H:%i'), 
                             'hora_fin', TIME_FORMAT(h.hora_fin, '%H:%i')
                           )
-                        ), ']') AS JSON)
+                        )
                  FROM asistencia_horario ah 
                  JOIN horarios h ON ah.id_horario = h.id
                  WHERE ah.id_alumno = ast.id_alumno 
                    AND ah.fecha = ast.fecha 
-                   AND h.id_asignacion = ast.id_asignacion) as detalles
+                   AND ah.id_asistencia = ast.id) as detalles
          FROM asistencia ast 
          JOIN alumnos al ON ast.id_alumno = al.id 
          JOIN personas p ON al.id_persona = p.id
@@ -780,7 +781,10 @@ const docenteController = {
              FROM matriculas m
              JOIN alumnos a ON m.id_alumno = a.id
              JOIN personas p ON a.id_persona = p.id
+             LEFT JOIN users u ON u.id_persona = a.id_persona AND u.id_rol = 3
              WHERE m.id_grado = ? AND m.id_periodo = ?
+               AND a.estado != 'Retirado'
+               AND (u.id IS NULL OR u.activo = 1)
              ORDER BY p.apellido_paterno, p.apellido_materno, p.nombres`,
             [asig.id_grado, asig.id_periodo]
           );

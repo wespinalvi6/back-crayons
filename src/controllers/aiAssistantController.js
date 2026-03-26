@@ -1,14 +1,75 @@
 const { OpenAI } = require("openai");
 const { pool } = require("../config/database");
 
+// Whitelist de tablas y columnas permitidas para consultas SQL
+const ALLOWED_TABLES = {
+    'personas': ['id', 'dni', 'nombres', 'apellido_paterno', 'apellido_materno', 'fecha_nacimiento', 'email', 'telefono', 'direccion', 'sexo'],
+    'roles': ['id', 'nombre'],
+    'alumnos': ['id', 'id_persona', 'codigo_alumno'],
+    'apoderados': ['id', 'id_persona', 'ocupacion'],
+    'docentes': ['id', 'id_persona', 'codigo_docente', 'especialidad'],
+    'periodos_academicos': ['id', 'anio', 'fecha_inicio', 'fecha_fin', 'costo_matricula'],
+    'grados': ['id', 'nombre'],
+    'secciones': ['id', 'nombre'],
+    'cursos': ['id', 'nombre'],
+    'matriculas': ['id', 'id_alumno', 'id_grado', 'id_seccion', 'id_periodo', 'estado'],
+    'asignaciones': ['id', 'id_docente', 'id_curso', 'id_grado', 'id_seccion', 'id_periodo'],
+    'asistencia': ['id', 'id_alumno', 'id_asignacion', 'fecha', 'asistio', 'observacion'],
+    'cuotas': ['id', 'id_matricula', 'tipo', 'monto', 'monto_pagado', 'estado', 'fecha_vencimiento'],
+    'justificaciones': ['id', 'id_matricula', 'tipo', 'estado', 'created_at']
+};
+
+const BLOCKED_KEYWORDS = [
+    'DELETE', 'UPDATE', 'DROP', 'INSERT', 'ALTER', 'TRUNCATE', 'REPLACE',
+    'GRANT', 'REVOKE', 'UNION', 'EXEC', 'SHOW', 'DESCRIBE', 'CREATE',
+    '--', '/*', '*/', ';', 'OR 1=1', 'OR 1 = 1'
+];
+
+/**
+ * Valida que el SQL solo use tablas y columnas permitidas
+ */
+function validateSqlSecurity(sql) {
+    if (!sql || typeof sql !== 'string') return false;
+
+    const upperSql = sql.toUpperCase();
+
+    // Verificar palabras bloqueadas
+    for (const keyword of BLOCKED_KEYWORDS) {
+        if (upperSql.includes(keyword)) return false;
+    }
+
+    // Verificar que solo sea SELECT
+    if (!/^SELECT\s/i.test(sql.trim())) return false;
+
+    // Verificar que solo use tablas permitidas
+    const fromMatch = upperSql.match(/FROM\s+(\w+)/);
+    if (fromMatch) {
+        const table = fromMatch[1].toLowerCase();
+        if (!ALLOWED_TABLES[table]) return false;
+    }
+
+    const joinMatches = upperSql.match(/JOIN\s+(\w+)/g);
+    if (joinMatches) {
+        for (const match of joinMatches) {
+            const table = match.replace(/JOIN\s+/i, '').toLowerCase();
+            if (!ALLOWED_TABLES[table]) return false;
+        }
+    }
+
+    return true;
+}
+
 const aiAssistant = async (req, res) => {
     try {
         const { pregunta } = req.body;
         const userToken = req.user;
 
-        if (!pregunta) {
-            return res.status(400).json({ error: "Debe proporcionar una pregunta." });
+        if (!pregunta || typeof pregunta !== 'string' || pregunta.length > 500) {
+            return res.status(400).json({ error: "Debe proporcionar una pregunta válida (máx 500 caracteres)." });
         }
+
+        // Sanitizar pregunta básica
+        const sanitizedPregunta = pregunta.replace(/[<>]/g, '');
 
         let unRol = "ALUMNO";
         if (userToken?.id_rol === 1) unRol = "DIRECTOR";
@@ -28,7 +89,6 @@ const aiAssistant = async (req, res) => {
         const schema = `
       - personas (id, dni, nombres, apellido_paterno, apellido_materno, fecha_nacimiento, email, telefono, direccion, sexo)
       - roles (id, nombre)
-      - users (id, id_persona, id_rol, username, email, password)
       - alumnos (id, id_persona, codigo_alumno)
       - apoderados (id, id_persona, ocupacion)
       - docentes (id, id_persona, codigo_docente, especialidad)
@@ -138,12 +198,16 @@ Responde SIEMPRE en JSON puro válido. Sin backticks, sin markdown, solo el obje
         let finalAnswer = aiJson.respuesta;
 
         if (aiJson.sql) {
-            const isSelect = /^SELECT\s/i.test(aiJson.sql.trim());
-            const hasDML = /(DELETE|UPDATE|DROP|INSERT|ALTER|TRUNCATE|REPLACE|GRANT|REVOKE)\s/i.test(aiJson.sql);
+            // Validación de seguridad mejorada usando whitelist de tablas
+            const isSecure = validateSqlSecurity(aiJson.sql);
 
-            if (isSelect && !hasDML) {
+            if (isSecure) {
                 try {
-                    const [rows] = await pool.query(aiJson.sql);
+                    // Agregar timeout para prevenir queries largas
+                    const [rows] = await pool.query({
+                        sql: aiJson.sql,
+                        timeout: 10000 // 10 segundos máximo
+                    });
                     dbResult = rows;
 
                     // Segunda ronda: Resumir los datos en lenguaje natural

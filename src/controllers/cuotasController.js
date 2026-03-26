@@ -37,13 +37,36 @@ class CuotasController {
     }
   }
 
-  // Obtener cuotas completas por DNI y año (Para Director)
+  // Obtener cuotas completas por DNI y año (Para Director y Alumno mismo DNI)
   static async obtenerCuotasPorDniYAnio(req, res) {
     try {
       const { dni, anio } = req.params;
 
+      // Validar parámetros
       if (!dni || !anio) {
         return res.status(400).json({ status: false, message: 'El DNI y el año son obligatorios' });
+      }
+
+      // Validar formato de DNI (8 dígitos)
+      if (!/^\d{8}$/.test(dni)) {
+        return res.status(400).json({ status: false, message: 'DNI inválido' });
+      }
+
+      // Validar año (4 dígitos)
+      if (!/^\d{4}$/.test(anio)) {
+        return res.status(400).json({ status: false, message: 'Año inválido' });
+      }
+
+      // IDOR Mitigation: Verificar permisos ANTES de consultar la base de datos
+      const esDirector = req.user.id_rol === 1;
+      const esMismoUsuario = await Cuota.verificarPropiedadDni(req.user.id_persona, dni);
+
+      if (!esDirector && !esMismoUsuario) {
+        // No revelar si el DNI existe o no
+        return res.status(404).json({
+          status: false,
+          message: `No se encontraron cuotas para el DNI ${dni} en el año ${anio}`
+        });
       }
 
       const cuotas = await Cuota.buscarPorDniYAnio(dni, anio);
@@ -143,6 +166,10 @@ class CuotasController {
   // Obtener cuotas por Año, Grado y Estado (Para Director)
   static async obtenerCuotasPorFiltros(req, res) {
     try {
+      if (req.user.id_rol !== 1) {
+        return res.status(403).json({ status: false, message: 'No tiene permiso para realizar esta consulta masiva.' });
+      }
+
       const { anio, idGrado, estado } = req.params;
 
       if (!anio || !idGrado || !estado) {

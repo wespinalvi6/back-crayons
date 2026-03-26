@@ -1,5 +1,21 @@
 const pool = require('../config/database');
 const { decrypt, blindIndex } = require('../utils/cryptoUtils');
+const { notifyAbsenceToParents } = require('../utils/notificationHelper');
+
+// Helper para sanitizar strings
+const sanitizeString = (str) => {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[<>\"'%;()&+\-\*\/\\]/g, '').trim();
+};
+
+// Helper para validar fecha ISO
+const isValidISODate = (dateString) => {
+  if (typeof dateString !== 'string') return false;
+  const regex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!regex.test(dateString)) return false;
+  const date = new Date(dateString);
+  return date instanceof Date && !isNaN(date) && dateString === date.toISOString().split('T')[0];
+};
 
 const marcarAsistencia = async (req, res) => {
   let connection;
@@ -47,6 +63,29 @@ const marcarAsistencia = async (req, res) => {
         'INSERT INTO asistencia (id_alumno, id_asignacion, fecha, asistio, observacion) VALUES (?, ?, ?, ?, ?)',
         [final_id_alumno, id_asignacion, fecha, estado === 'Presente' || estado === 1 ? 1 : 0, observaciones || null]
       );
+    }
+
+    // Notificar si es falta (segundo plano)
+    if (estado === 'Ausente' || estado === 0 || estado === '0') {
+      console.log(`[DEBUG] Marcando falta para Alumno ID: ${final_id_alumno}, triggering notification...`);
+      (async () => {
+        try {
+          const [asigInfo] = await connection.query(
+            `SELECT c.nombre as curso, CONCAT(p.nombres, ' ', p.apellido_paterno) as docente
+             FROM asignaciones a
+             JOIN cursos c ON c.id = a.id_curso
+             JOIN docentes d ON d.id = a.id_docente
+             JOIN personas p ON p.id = d.id_persona
+             WHERE a.id = ?`, [id_asignacion]
+          );
+          if (asigInfo.length) {
+            console.log(`[DEBUG] Encontrada info para notificación: Curso=${asigInfo[0].curso}, Docente=${asigInfo[0].docente}`);
+            await notifyAbsenceToParents(pool, final_id_alumno, asigInfo[0].curso, fechaFinal, asigInfo[0].docente);
+          } else {
+            console.warn(`[DEBUG] No se encontró info de asignación para ID: ${id_asignacion}`);
+          }
+        } catch (e) { console.error('Error at notifyAbsence single:', e.message); }
+      })();
     }
 
     res.json({
@@ -143,7 +182,8 @@ const obtenerAsistenciasPorAlumno = async (req, res) => {
         c.nombre AS curso,
         pd.nombres, pd.apellido_paterno, pd.apellido_materno,
         g.nombre AS grado,
-        j.estado as justificacion_estado
+        j.estado as justificacion_estado,
+        j.comentario_revision as comentario_justificacion
       FROM asistencia ast
       JOIN alumnos a ON ast.id_alumno = a.id
       LEFT JOIN asignaciones asig ON ast.id_asignacion = asig.id
@@ -152,10 +192,18 @@ const obtenerAsistenciasPorAlumno = async (req, res) => {
       LEFT JOIN docentes d ON asig.id_docente = d.id
       LEFT JOIN personas pd ON d.id_persona = pd.id
       LEFT JOIN grados g ON m.id_grado = g.id
-      LEFT JOIN justificaciones j ON j.id_asistencia = ast.id AND j.estado IN ('Pendiente', 'Aprobada')
-      WHERE a.id_persona = ?
+      LEFT JOIN justificaciones j ON j.id = (
+          SELECT id FROM justificaciones 
+          WHERE id_asistencia = ast.id 
+          ORDER BY created_at DESC LIMIT 1
+      )
+      WHERE (a.id_persona = ? OR EXISTS (
+        SELECT 1 FROM alumno_apoderado aa
+        JOIN apoderados ap ON aa.id_apoderado = ap.id
+        WHERE aa.id_alumno = a.id AND ap.id_persona = ?
+      ))
     `;
-    let params = [id_persona];
+    let params = [id_persona, id_persona];
 
     if (anio) { query += " AND YEAR(ast.fecha) = ?"; params.push(anio); }
     if (mes) { query += " AND MONTH(ast.fecha) = ?"; params.push(mes); }
@@ -169,7 +217,8 @@ const obtenerAsistenciasPorAlumno = async (req, res) => {
       ...r,
       estado: r.asistio === 1 ? 'Presente' : 'Ausente',
       justificacion_estado: r.justificacion_estado || null,
-      permite_justificar: r.asistio === 0 && !r.justificacion_estado,
+      comentario_justificacion: r.comentario_justificacion,
+      permite_justificar: r.asistio === 0 && (!r.justificacion_estado || r.justificacion_estado === 'Rechazada'),
       nombre_docente: `${decrypt(r.nombres || '')} ${decrypt(r.apellido_paterno || '')} ${decrypt(r.apellido_materno || '')}`.trim(),
       nombres: undefined, apellido_paterno: undefined, apellido_materno: undefined
     }));
@@ -208,7 +257,9 @@ const obtenerFaltasParaJustificar = async (req, res) => {
         ast.*, 
         c.nombre as curso,
         g.nombre as grado,
-        pd.nombres, pd.apellido_paterno, pd.apellido_materno
+        pd.nombres, pd.apellido_paterno, pd.apellido_materno,
+        j.estado as justificacion_estado,
+        j.comentario_revision as comentario_justificacion
       FROM asistencia ast
       JOIN alumnos a ON ast.id_alumno = a.id
       JOIN asignaciones asig ON ast.id_asignacion = asig.id
@@ -217,16 +268,27 @@ const obtenerFaltasParaJustificar = async (req, res) => {
       JOIN grados g ON m.id_grado = g.id
       LEFT JOIN docentes d ON asig.id_docente = d.id
       LEFT JOIN personas pd ON d.id_persona = pd.id
-      LEFT JOIN justificaciones j ON j.id_asistencia = ast.id AND j.estado IN ('Pendiente', 'Aprobada')
-      WHERE a.id_persona = ? AND ast.asistio = 0 AND j.id IS NULL
+      LEFT JOIN justificaciones j ON j.id = (
+          SELECT id FROM justificaciones 
+          WHERE id_asistencia = ast.id 
+          ORDER BY created_at DESC LIMIT 1
+      )
+      WHERE (a.id_persona = ? OR EXISTS (
+          SELECT 1 FROM alumno_apoderado aa
+          JOIN apoderados ap ON aa.id_apoderado = ap.id
+          WHERE aa.id_alumno = a.id AND ap.id_persona = ?
+      )) AND ast.asistio = 0
       ORDER BY ast.fecha DESC
-    `, [id_persona]);
+    `, [id_persona, id_persona]);
 
     const decryptedRows = rows.map(r => ({
       ...r,
       observaciones: r.observacion,
       observacion: undefined,
       estado: r.asistio === 1 ? 'Presente' : 'Ausente',
+      justificacion_estado: r.justificacion_estado,
+      comentario_justificacion: r.comentario_justificacion,
+      permite_justificar: r.asistio === 0 && (!r.justificacion_estado || r.justificacion_estado === 'Rechazada'),
       nombre_docente: `${decrypt(r.nombres || '')} ${decrypt(r.apellido_paterno || '')} ${decrypt(r.apellido_materno || '')}`.trim(),
       nombres: undefined, apellido_paterno: undefined, apellido_materno: undefined
     }));
@@ -274,7 +336,30 @@ const marcarAsistenciaMasiva = async (req, res) => {
     }
 
     await connection.commit();
-    res.json({ success: true, message: `${values.length} registros procesados.` });
+
+    // Notificar ausencias masivas (segundo plano)
+    asistencia.filter(a => a.estado === 'Ausente' || a.estado === 0 || a.estado === '0').forEach(async (item) => {
+      try {
+        console.log(`[DEBUG-MASS] Procesando falta para alumno ID: ${item.id_alumno || item.id_matricula}`);
+        const [asigInfo] = await pool.query(
+          `SELECT c.nombre as curso, CONCAT(p.nombres, ' ', p.apellido_paterno) as docente
+           FROM asignaciones a
+           JOIN cursos c ON c.id = a.id_curso
+           JOIN docentes d ON d.id = a.id_docente
+           JOIN personas p ON p.id = d.id_persona
+           WHERE a.id = ?`, [item.id_asignacion]
+        );
+        if (asigInfo.length) {
+          const idAlumno = item.id_alumno || item.id_matricula;
+          console.log(`[DEBUG-MASS] Notificando Ausencia: Curso=${asigInfo[0].curso}, Fecha=${item.fecha}`);
+          await notifyAbsenceToParents(pool, idAlumno, asigInfo[0].curso, item.fecha, asigInfo[0].docente);
+        } else {
+          console.warn(`[DEBUG-MASS] No hay info para asignación: ${item.id_asignacion}`);
+        }
+      } catch (e) { console.error('Error notifying from mass:', e.message); }
+    });
+
+    res.json({ success: true, message: `${asistencia.length} registros procesados.` });
 
   } catch (error) {
     if (connection) await connection.rollback();

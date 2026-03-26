@@ -151,6 +151,8 @@ const login = async (req, res) => {
     }
 
     const accessTokenSecret = process.env.JWT_SECRET;
+    console.log('JWT_SECRET en login (longitud):', accessTokenSecret?.length);
+    console.log('JWT_SECRET en login (primeros 10 chars):', accessTokenSecret?.substring(0, 10));
     if (!accessTokenSecret) {
       console.error('CRITICAL: JWT_SECRET no definida en el entorno.');
       return res.status(500).json({ message: "Error interno del servidor" });
@@ -203,6 +205,11 @@ const login = async (req, res) => {
       sameSite: 'Strict',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
+
+    // Actualizar FCM Token si viene en la petición
+    if (req.body.fcm_token) {
+      await connection.query("UPDATE users SET fcm_token = ? WHERE id = ?", [req.body.fcm_token, user.id]);
+    }
 
     res.json({ token: accessToken, roleId: user.id_rol });
   } catch (error) {
@@ -310,7 +317,10 @@ const changePassword = async (req, res) => {
     // CORRECCIÓN: El orden de parámetros aquí debe coincidir con la función updatePassword
     await User.updatePassword(user.id, connection, newPassword);
 
-    return res.json({ message: "Contraseña actualizada exitosamente" });
+    // Vuln #9: Revocar TODOS los refresh tokens del usuario por seguridad
+    await connection.query("UPDATE refresh_tokens SET revocado = 1 WHERE id_usuario = ?", [user.id]);
+
+    return res.json({ message: "Contraseña actualizada exitosamente. Todas sus sesiones previas han sido cerradas por seguridad." });
   } catch (error) {
     console.error("Error al cambiar la contraseña:", error);
     return res.status(500).json({ message: "Error en el servidor" });

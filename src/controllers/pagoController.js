@@ -160,6 +160,10 @@ const webhookMercadoPago = async (req, res) => {
 
 const registrarPagoPresencial = async (req, res) => {
   try {
+    if (!req.user || req.user.id_rol !== 1) {
+      return res.status(403).json({ success: false, message: 'No tiene permiso para registrar pagos presenciales. Se requiere rol de Director o Cajero.' });
+    }
+
     const { id_cuota, monto_pagado, metodo_pago, numero_recibo, observaciones } = req.body;
 
     if (!id_cuota || !monto_pagado) {

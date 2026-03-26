@@ -29,10 +29,14 @@ class CuotasModel {
       JOIN alumnos a ON m.id_alumno = a.id
       LEFT JOIN asignaciones asig ON m.id_grado = asig.id_grado AND m.id_seccion = asig.id_seccion AND m.id_periodo = asig.id_periodo
       LEFT JOIN cursos cu ON asig.id_curso = cu.id
-      WHERE a.id_persona = ?
+      WHERE (a.id_persona = ? OR EXISTS (
+        SELECT 1 FROM alumno_apoderado aa
+        JOIN apoderados ap ON aa.id_apoderado = ap.id
+        WHERE aa.id_alumno = a.id AND ap.id_persona = ?
+      ))
       ORDER BY c.fecha_vencimiento ASC
     `;
-    const [rows] = await db.pool.query(query, [idPersona]);
+    const [rows] = await db.pool.query(query, [idPersona, idPersona]);
     return rows;
   }
 
@@ -45,10 +49,14 @@ class CuotasModel {
       JOIN alumnos a ON m.id_alumno = a.id
       JOIN periodos_academicos pa ON m.id_periodo = pa.id
       JOIN grados g ON m.id_grado = g.id
-      WHERE a.id_persona = ? AND pa.anio = ?
+      WHERE (a.id_persona = ? OR EXISTS (
+        SELECT 1 FROM alumno_apoderado aa
+        JOIN apoderados ap ON aa.id_apoderado = ap.id
+        WHERE aa.id_alumno = a.id AND ap.id_persona = ?
+      )) AND pa.anio = ?
       ORDER BY c.fecha_vencimiento ASC
     `;
-    const [rows] = await db.pool.query(query, [idPersona, anio]);
+    const [rows] = await db.pool.query(query, [idPersona, idPersona, anio]);
     return rows;
   }
 
@@ -83,7 +91,7 @@ class CuotasModel {
   static async buscarPorDniYAnio(dni, anio) {
     const dniHash = blindIndex(dni);
     const query = `
-        SELECT c.*, p.nombres, p.apellido_paterno, p.apellido_materno, g.nombre as grado, p.dni,
+        SELECT c.*, p.nombres, p.apellido_paterno, p.apellido_materno, g.nombre as grado, p.dni, p.id as id_persona,
                pa.activo as periodo_activo, m.estado as matricula_estado
         FROM cuotas c
         JOIN matriculas m ON c.id_matricula = m.id
@@ -102,6 +110,20 @@ class CuotasModel {
       apellido_paterno: decrypt(r.apellido_paterno),
       apellido_materno: decrypt(r.apellido_materno)
     }));
+  }
+
+  // Verificar si el DNI pertenece al id_persona del usuario autenticado (para IDOR prevention)
+  static async verificarPropiedadDni(idPersona, dni) {
+    const dniHash = blindIndex(dni);
+    const query = `
+        SELECT 1
+        FROM alumnos a
+        JOIN personas p ON a.id_persona = p.id
+        WHERE a.id_persona = ? AND p.dni_hash = ?
+        LIMIT 1
+      `;
+    const [rows] = await db.pool.query(query, [idPersona, dniHash]);
+    return rows.length > 0;
   }
 
   // Buscar cuotas por Filtros (Año, Grado, Estado)

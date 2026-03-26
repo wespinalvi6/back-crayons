@@ -12,11 +12,11 @@ const {
   eliminarJustificacion
 } = require('../controllers/justificacionController');
 
-// Configurar multer para subir archivos
+// Configurar multer para subir archivos - Límite reducido a 5MB
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB máximo
+    fileSize: 5 * 1024 * 1024 // 5MB máximo
   },
   fileFilter: (req, file, cb) => {
     // Permitir PDF e imágenes para las justificaciones

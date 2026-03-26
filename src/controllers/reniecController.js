@@ -4,11 +4,24 @@ const Persona = require("../models/Persona");
 const pool = require("../config/database");
 const { decrypt } = require("../utils/cryptoUtils");
 
+// Validar token API al cargar el módulo
+if (!process.env.RENIEC_API_TOKEN) {
+  console.warn("WARN: RENIEC_API_TOKEN no está configurado");
+}
+
 const buscarPersonaPorDni = async (req, res) => {
   const { dni } = req.params;
 
-  if (!dni || dni.length !== 8) {
+  if (!dni || dni.length !== 8 || !/^\d{8}$/.test(dni)) {
     return res.status(400).json({ status: false, message: "DNI inválido" });
+  }
+
+  // Verificar que el token esté configurado
+  if (!process.env.RENIEC_API_TOKEN) {
+    return res.status(500).json({
+      status: false,
+      message: "Servicio de consulta no disponible"
+    });
   }
 
   try {
@@ -37,8 +50,7 @@ const buscarPersonaPorDni = async (req, res) => {
       `https://api.decolecta.com/v1/reniec/dni?numero=${dni}`,
       {
         headers: {
-          Authorization:
-            "Bearer sk_2440.1UO3krDzjhWXoCWcmYRqZ7k2f8IRJBB9",
+          Authorization: `Bearer ${process.env.RENIEC_API_TOKEN}`,
         },
       }
     );
