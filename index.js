@@ -86,7 +86,7 @@ app.use(compression());
 // Rate Limiting Específico para Autenticación (Vuln #10)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50, // 5 intentos permitidos por cada ventana de 15 minutos
+  max: 100, // 5 intentos permitidos por cada ventana de 15 minutos
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Demasiados intentos de inicio de sesión, intente más tarde." }
@@ -96,7 +96,7 @@ app.use("/api/auth/login", authLimiter);
 // Rate Limiting General - Reducido de 1000 a 100 requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200, // 100 requests por 15 minutos
+  max: 300, // 100 requests por 15 minutos
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Demasiadas peticiones, intente más tarde." }

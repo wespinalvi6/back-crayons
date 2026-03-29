@@ -24,13 +24,18 @@ const generarPagoCuota = async (req, res) => {
     const [rows] = await connection.query(`
       SELECT c.*, CAST(c.monto AS DECIMAL(10,2)) as monto_decimal,
              a.id as id_alumno, p.id as id_persona, p.nombres, p.apellido_paterno, p.apellido_materno, p.dni, p.email,
-             pa.activo as periodo_activo, m.estado as matricula_estado
+             pa.activo as periodo_activo, m.estado as matricula_estado,
+             pap.id as id_persona_apoderado, pap.email as email_apoderado
       FROM cuotas c
       JOIN matriculas m ON c.id_matricula = m.id
       JOIN alumnos a ON m.id_alumno = a.id
       JOIN personas p ON a.id_persona = p.id
       JOIN periodos_academicos pa ON m.id_periodo = pa.id
+      LEFT JOIN alumno_apoderado aa ON aa.id_alumno = a.id
+      LEFT JOIN apoderados apo ON apo.id = aa.id_apoderado
+      LEFT JOIN personas pap ON pap.id = apo.id_persona
       WHERE c.id = ?
+      LIMIT 1
     `, [id_cuota]);
 
     if (rows.length === 0) {
@@ -51,7 +56,9 @@ const generarPagoCuota = async (req, res) => {
     const decryptedNombres = decrypt(item.nombres);
     const decryptedApPaterno = decrypt(item.apellido_paterno);
 
-    if (item.id_persona !== id_persona) {
+    const esAlumno = item.id_persona === id_persona;
+    const esApoderado = item.id_persona_apoderado === id_persona;
+    if (!esAlumno && !esApoderado) {
       return res.status(403).json({ success: false, message: 'No tienes permiso para pagar esta cuota' });
     }
 
@@ -77,7 +84,7 @@ const generarPagoCuota = async (req, res) => {
         payer: {
           name: decryptedNombres,
           surname: decryptedApPaterno,
-          email: item.email || 'test_user_123456@testuser.com',
+          email: item.email_apoderado || item.email || 'test_user_123456@testuser.com',
           identification: { type: 'DNI', number: decryptedDni }
         },
         back_urls: {

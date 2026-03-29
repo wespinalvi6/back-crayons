@@ -42,7 +42,7 @@ const listarAlumnosConApoderados = async (req, res) => {
       SELECT
         e.id AS alumno_id, p.dni AS alumno_dni, p.nombres AS alumno_nombre, p.apellido_paterno AS alumno_apellido_paterno, p.apellido_materno AS alumno_apellido_materno, p.fecha_nacimiento,
         e.estado, u.activo, pa3.activo AS periodo_activo,
-        pax.dni AS apoderado_dni, pax.nombres AS apoderado_nombre, pax.apellido_paterno AS apoderado_apellido_paterno, pax.apellido_materno AS apoderado_apellido_materno, pax.telefono AS apoderado_telefono,
+        pax.dni AS apoderado_dni, pax.nombres AS apoderado_nombre, pax.apellido_paterno AS apoderado_apellido_paterno, pax.apellido_materno AS apoderado_apellido_materno, pax.telefono AS apoderado_telefono, pax.email AS apoderado_email,
         ea.parentesco, g.nombre AS grado_nombre, m.fecha_matricula
       FROM (
         SELECT a2.id FROM alumnos a2 JOIN matriculas m2 ON m2.id_alumno = a2.id JOIN periodos_academicos pa2 ON m2.id_periodo = pa2.id
@@ -88,6 +88,7 @@ const listarAlumnosConApoderados = async (req, res) => {
           apellido_paterno: decrypt(row.apoderado_apellido_paterno),
           apellido_materno: decrypt(row.apoderado_apellido_materno),
           telefono: row.apoderado_telefono ? decrypt(row.apoderado_telefono) : null,
+          email: row.apoderado_email || null,
           parentesco: row.parentesco
         });
       }

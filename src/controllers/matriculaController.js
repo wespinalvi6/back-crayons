@@ -34,7 +34,7 @@ class MatriculaController {
           estudiante.apellido_paterno,
           estudiante.apellido_materno,
           estudiante.fecha_nacimiento,
-          estudiante.email,
+          null,
           estudiante.telefono,
           estudiante.direccion,
           estudiante.sexo
@@ -66,7 +66,7 @@ class MatriculaController {
             datos.apellido_paterno || "",
             datos.apellido_materno || "",
             datos.fecha_nacimiento || null,
-            null,
+            datos.email || null,
             datos.telefono,
             null
           );
@@ -80,7 +80,7 @@ class MatriculaController {
           try {
             await User.crear(connection, {
               id_persona: personaId,
-              email: `${datos.dni}@colegio.edu.pe`,
+              email: datos.email || `${datos.dni}@colegio.edu.pe`,
               password: hashedPasswordApoderado,
               username: usernameApoderado,
               id_rol: 3
